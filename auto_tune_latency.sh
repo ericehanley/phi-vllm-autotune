@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Install required packages
-echo "--- Installing required packages (bc, git, datamash) ---"
-apt-get update && apt-get install -y bc git datamash
+# Install required packages (datamash is no longer needed)
+echo "--- Installing required packages (bc, git) ---"
+apt-get update && apt-get install -y bc git
 echo "--- Dependencies installed ---"
 
 # --- Script Parameters ---
@@ -115,10 +115,23 @@ run_benchmark() {
         latencies+=($latency_ms)
     done
 
-    # --- CORRECTED STATISTICS CALCULATION ---
-    all_latencies=$(printf "%s\n" "${latencies[@]}")
-    median_latency_ms=$(echo "$all_latencies" | datamash median 1)
-    p99_latency_ms=$(echo "$all_latencies" | datamash perc 99 1)
+    # --- ROBUST STATISTICS CALCULATION (No datamash) ---
+    sorted_latencies=($(printf "%s\n" "${latencies[@]}" | sort -n))
+    count=${#sorted_latencies[@]}
+    
+    # Calculate Median
+    # For an even number of elements, this correctly takes the lower of the two middle elements.
+    median_idx=$(( (count - 1) / 2 ))
+    median_latency_ms=${sorted_latencies[$median_idx]}
+
+    # Calculate P99 (99th Percentile) using nearest-rank method
+    p99_rank=$(echo "($count * 99 + 99) / 100" | bc)
+    p99_idx=$(( p99_rank - 1 ))
+    # Safety check for index
+    if (( p99_idx < 0 )); then p99_idx=0; fi
+    if (( p99_idx >= count )); then p99_idx=$((count - 1)); fi
+    p99_latency_ms=${sorted_latencies[$p99_idx]}
+
 
     result_line="tokens: $max_num_batched_tokens, cache_rate: $min_cache_rate, median_latency: $median_latency_ms ms, p99_latency: $p99_latency_ms ms"
     echo "RESULT: $result_line"
@@ -134,7 +147,7 @@ run_benchmark() {
     sleep 5
 }
 
-# --- Main Execution Logic (no changes) ---
+# --- Main Execution Logic ---
 read -r -a num_seqs_list <<< "$NUM_SEQS_LIST"
 read -r -a num_batched_tokens_list <<< "$NUM_BATCHED_TOKENS_LIST"
 read -r -a request_rate_list <<< "$REQUEST_RATE_LIST"
